@@ -1,51 +1,24 @@
-name: Build Windows
+# Python virtual environments
+.venv/
+venv/
 
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
 
-jobs:
-  build:
-    runs-on: windows-latest
+# Logs
+*.log
 
-    steps:
-      - uses: actions/checkout@v3
+# Build outputs
+build/
+dist/
+*.spec
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
+# Editor / OS
+.vscode/
+.DS_Store
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller
-
-      - name: Build EXE (no console)
-        run: |
-          pyinstaller --noconsole --onefile --name OtakuHangman otaku_hang_man.py
-
-      - name: Smoke test (launch EXE briefly)
-        shell: pwsh
-        run: |
-          $exe = "${{ github.workspace }}\dist\OtakuHangman.exe"
-          if (!(Test-Path $exe)) {
-            Write-Host "EXE not found at: $exe"
-            exit 1
-          }
-
-          Write-Host "Launching: $exe"
-          $p = Start-Process -FilePath $exe -PassThru
-          Start-Sleep -Seconds 3
-
-          if ($p.HasExited) {
-            Write-Host "EXE exited immediately with code: $($p.ExitCode)"
-            if ($p.ExitCode -ne 0) { exit $p.ExitCode }
-          } else {
-            Write-Host "EXE is running (good). Stopping it to avoid hanging the CI runner."
-            Stop-Process -Id $p.Id -Force
-          }
+# Optional
+*.code-workspace

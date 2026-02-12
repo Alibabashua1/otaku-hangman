@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,17 +27,23 @@ jobs:
           python -m pip install -U pip
           pip install pyinstaller
 
+      # IMPORTANT: use cmd so PowerShell doesn't choke on flags / continuation
       - name: Build EXE (Tkinter GUI)
-        run: |
-          pyinstaller --noconfirm --clean --windowed --onefile ^
-            --name "OtakuHangman" ^
-            --add-data "otaku_hang_man.py;." ^
-            --add-data "otaku_save.json;." ^
-            otaku_gui.py
+        shell: cmd
+        run: pyinstaller --noconfirm --clean --windowed --onefile --name "OtakuHangman" --add-data "otaku_hang_man.py;." --add-data "otaku_save.json;." otaku_gui.py
 
       - name: Create ZIP
+        shell: pwsh
         run: |
-          powershell Compress-Archive -Path dist\OtakuHangman.exe -DestinationPath OtakuHangman-win.zip
+          $exe = Get-ChildItem -Recurse -Filter OtakuHangman.exe dist -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { Write-Host "OtakuHangman.exe not found under dist/."; exit 1 }
+          Compress-Archive -Path $exe.FullName -DestinationPath OtakuHangman-win.zip -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OtakuHangman-win
+          path: OtakuHangman-win.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
