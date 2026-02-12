@@ -8,7 +8,13 @@ import tkinter as tk
 import re
 import traceback
 import codecs
-import fcntl
+# fcntl is Unix-only (not available on Windows)
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    fcntl = None
+    HAS_FCNTL = False
 import select
 
 LOG_PATH = "otaku_gui.log"
@@ -913,11 +919,12 @@ class OtakuGUI:
         """
         try:
             parts = []
-            # Read available bytes from child stdout (non-blocking) on the Tk main thread
+            # Read available bytes from child stdout on the Tk main thread.
+            # POSIX: we make the pipe non-blocking (fcntl) and can safely os.read here.
+            # Windows: os.read on a pipe is blocking; use the reader thread instead.
             try:
-                if self.proc and self.proc.stdout:
+                if self.proc and self.proc.stdout and (sys.platform != "win32") and HAS_FCNTL:
                     fd = self.proc.stdout.fileno()
-                    # read whatever is available without blocking
                     while True:
                         try:
                             b = os.read(fd, 4096)
@@ -956,7 +963,29 @@ class OtakuGUI:
             except Exception:
                 pass
 
-    # (reader thread removed; see _drain_queue for non-blocking read)
+    def _reader_loop(self):
+        """Windows-safe stdout reader (blocking). Puts decoded text into out_queue."""
+        p = self.proc
+        try:
+            if not p or not p.stdout:
+                return
+            while True:
+                try:
+                    b = p.stdout.read(4096)
+                except Exception:
+                    break
+                if not b:
+                    break
+                try:
+                    s = self._stdout_decoder.decode(b)
+                except Exception:
+                    s = b.decode("utf-8", errors="replace")
+                try:
+                    self.out_queue.put(s)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _launch_game_process(self):
         script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "otaku_hang_man.py")
@@ -983,12 +1012,21 @@ class OtakuGUI:
                 log("[otaku_gui] child pid:", self.proc.pid)
             except Exception:
                 pass
-            # Make stdout non-blocking (POSIX) so we can read it safely from the Tk main thread
+            # POSIX: Make stdout non-blocking so we can os.read() safely from the Tk main thread.
+            # Windows: fcntl is unavailable; use a reader thread instead.
             try:
-                if self.proc and self.proc.stdout:
+                if self.proc and self.proc.stdout and (sys.platform != "win32") and HAS_FCNTL:
                     fd = self.proc.stdout.fileno()
                     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
                     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            except Exception:
+                pass
+
+            # Windows: start a blocking reader thread to avoid freezing the Tk thread
+            try:
+                if sys.platform == "win32":
+                    self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+                    self._reader_thread.start()
             except Exception:
                 pass
             # reset decoder for a fresh run
