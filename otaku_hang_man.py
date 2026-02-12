@@ -2,6 +2,7 @@ import random
 import os
 import json
 import time
+import sys
 
 # ============================================================
 #  OTAKU HANGMAN - FINAL (Menu fixed)
@@ -218,8 +219,8 @@ r"""
    ✦ ｡ﾟ⋆ START ⋆｡ﾟ ✦     (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
       ╭─────╮        ♪
       │     │       /\_/\ 
-      │             ( -.- ) zzz
-      │              > ^ <
+      │            ( -.- ) zzz
+      │             > ^ <
       │
       │
 ╭─────┴──────────────╮
@@ -551,13 +552,13 @@ def kawaii_menu(save):
     if not unlocked:
         print(r"""
 ╔══════════════════════════════════════════════════════╗
-║              ✨ MENU / メニュー ✨                    ║
+║              ✨ MENU / メニュー ✨                     ║
 ╠══════════════════════════════════════════════════════╣
 ║  1) ▶ Play / 始める                                   ║
 ║                                                      ║
 ║     …a sealed door hums softly.  ◆◇◇◇                ║
 ║                                                      ║
-║  3) 📜 Stats                                           ║
+║  3) 📜 Stats                                         ║
 ║  4) ❌ Quit / やめる                                   ║
 ╠══════════════════════════════════════════════════════╣
 ║  Gambatte! (=^･ω･^=)ฅ                                 ║
@@ -566,14 +567,14 @@ def kawaii_menu(save):
     else:
         print(r"""
 ╔══════════════════════════════════════════════════════╗
-║              ✨ MENU / メニュー ✨                    ║
+║              ✨ MENU / メニュー ✨                     ║
 ╠══════════════════════════════════════════════════════╣
 ║  1) ▶ Play / 始める                                   ║
-║  2) 🔥 Challenge Mode 🔥                               ║
-║  3) 📜 Stats                                           ║
-║  4) ❌ Quit / やめる                                   ║
+║  2) 🔥 Challenge 🔥                                   ║
+║  3) 📜 Stats                                         ║
+║  4) ❌ Quit / やめる                                  ║
 ╠══════════════════════════════════════════════════════╣
-║  Gambatte! (=^･ω･^=)ฅ                                 ║
+║  Gambatte! (=^･ω･^=)ฅ                                ║
 ╚══════════════════════════════════════════════════════╝
 """)
 
@@ -608,6 +609,8 @@ def show_secret_note(save):
 
     clear_screen()
     print(r"""
+          
+
 🌸✨ SECRET NOTE ✨🌸
 (づ｡◕‿‿◕｡)づ
 
@@ -627,6 +630,7 @@ Bonus stat gained:
 
 System shutting up now.
 (๑>ᴗ<๑)♡
+A_
 """)
     input("Press Enter...")
 
@@ -652,12 +656,9 @@ def play_round(max_lives, level_name, frames, save, allow_sigil=True, **kwargs):
     display = ["_"] * len(wordchosen)
     guessed = set()
 
-    # Persist sigil progress across rounds via save file
-    sigil_collected = set(save.get("sigil_collected", []))
-    can_unlock_route = allow_sigil and (not save.get("dazy_unlocked"))
+    # Sigil progress is PER-ROUND only (must collect d/a/z/y in ONE run and win to save unlock)
+    sigil_session = set()  # letters triggered THIS round
     sigil_revealed = False  # only show UI after the player triggers it this round
-    sigil_triggers = 0  # how many times player typed a sigil letter this round
-    sigil_display = set()  # ritual UI: only letters triggered THIS round
 
     def is_single_latin_letter(s):
         return len(s) == 1 and s.isalpha() and s.isascii()
@@ -679,8 +680,8 @@ def play_round(max_lives, level_name, frames, save, allow_sigil=True, **kwargs):
 
         if allow_sigil and (not save.get("dazy_unlocked")) and sigil_revealed:
             print("🔒 sigil:")
-            print(f"   {sigil_bar(sigil_display)}")
-            print(f"   {sigil_letters(sigil_display)}")
+            print(f"   {sigil_bar(sigil_session)}")
+            print(f"   {sigil_letters(sigil_session)}")
 
         print("-" * 60)
 
@@ -698,21 +699,15 @@ def play_round(max_lives, level_name, frames, save, allow_sigil=True, **kwargs):
         guessed.add(guess)
 
         # -------------------------
-        # Sigil collection (D/A/Z/Y)
-        # Now triggers even if the guess is NOT in the word.
+        # Sigil (D/A/Z/Y) — PER ROUND ONLY
+        # Triggers even if the guess is NOT in the word.
         # -------------------------
         sigil_new = False
-        if allow_sigil and (guess in SIGIL_SET) and (guess not in sigil_collected) and (not save.get("dazy_unlocked")):
-            sigil_collected.add(guess)
-            sigil_new = True
-            sigil_revealed = True
-            # persist progress immediately
-            save["sigil_collected"] = sorted(sigil_collected)
-            write_save(save)
         if allow_sigil and (guess in SIGIL_SET) and (not save.get("dazy_unlocked")):
-            sigil_triggers += 1
             sigil_revealed = True
-            sigil_display.add(guess)
+            if guess not in sigil_session:
+                sigil_session.add(guess)
+                sigil_new = True
 
         # normal hangman logic
         if guess in wordchosen:
@@ -739,7 +734,7 @@ def play_round(max_lives, level_name, frames, save, allow_sigil=True, **kwargs):
                     print("Feels like something secret is forming ... ✨\n")
                 else:
                     print("...a familiar rune flickers softly ✧\n")
-                ritual_set = sigil_display
+                ritual_set = sigil_session
 
             # ritual animation: empty → lit
             print("   " + " ".join(["◇"] * 4))
@@ -760,22 +755,10 @@ def play_round(max_lives, level_name, frames, save, allow_sigil=True, **kwargs):
         else:
             print(pick_cute(CUTE_WRONG))
 
-        # if sigil is complete, unlock route with the congrats message
-        if (not save.get("dazy_unlocked")) and len(sigil_collected) == 4 and can_unlock_route:
-            # unlock route permanently
-            save["dazy_unlocked"] = True
-            save["dazy_unlock_count"] = int(save.get("dazy_unlock_count", 0)) + 1
-            write_save(save)
-            can_unlock_route = False
-            sigil_display = set(SIGIL_ORDER)
-            clear_screen()
-            print("\nCongratulations Dazy✨！You unlocked the challenge mode 🔥！！\n")
-            input("Press Enter...")
-            continue
 
         input("Press Enter...")
 
-    return {"won": ("_" not in display), "word": wordchosen}
+    return {"won": ("_" not in display), "word": wordchosen, "sigil_complete": (len(sigil_session) == 4)}
 
 
 def challenge_mode(save):
@@ -820,7 +803,7 @@ def challenge_mode(save):
             clear_screen()
             print(f"✅ Round cleared! ({streak}/{WINS_IN_A_ROW_TO_CLEAR})\n")
             print(f"WORD：{result.get('word')}！\n")
-            input("Press Enter...")
+            input("\nPress Enter...")
         else:
             streak = 0
             clear_screen()
@@ -829,9 +812,13 @@ def challenge_mode(save):
 
     # streak cleared — now require the secret password before recording the clear
     clear_screen()
-    print("🏆 CHALLENGE CLEARED!\n")
+    print("\n🏆 CHALLENGE CLEARED!\n")
     print("Extra check: guess from Kamisama Kiss ✧")
-    password = normalize(input("SECRET PASSWORD: "))
+    print("THINK CAREFULLY — ONE SHOT ONLY.\n")
+
+    # Print prompt explicitly to guarantee visibility across terminals
+    print("SECRET PASSWORD: ", end="", flush=True)
+    password = normalize(sys.stdin.readline())
 
     if password != "tomoe":
         print("\n⚠️  Wrong password. Clear not finalized.\n")
@@ -887,10 +874,22 @@ def main():
 
                 save = load_save()
 
-                clear_screen()
+                # Save unlock ONLY if this single round collected all sigils AND was won
+                if result.get("won") and result.get("sigil_complete") and (not save.get("dazy_unlocked")):
+                    save["dazy_unlocked"] = True
+                    save["dazy_unlock_count"] = int(save.get("dazy_unlock_count", 0)) + 1
+                    # keep sigil_collected empty since progress is per-round
+                    save["sigil_collected"] = []
+                    write_save(save)
+                    clear_screen()
+                    print("\nCongratulations Dazy✨！You unlocked the challenge mode 🔥！！\n")
+                    input("Press Enter...")
+                    save = load_save()
+                    clear_screen()
+
                 if result.get("won"):
                     print(f"\n🎉 YOU WIN!! The word was: {result.get('word')}  ✧٩(ˊωˋ*)و✧\n")
-                    print(f"答案是：{result.get('word')}！\n")
+                    print(f"WORD:：{result.get('word')}！\n")
                 else:
                     print(f"\n💀 YOU LOSE... The word was: {result.get('word')}  (っ˘̩╭╮˘̩)っ\n")
                 input("Press Enter to return to menu...")
@@ -940,10 +939,22 @@ def main():
 
             save = load_save()
 
-            clear_screen()
+            # Save unlock ONLY if this single round collected all sigils AND was won
+            if result.get("won") and result.get("sigil_complete") and (not save.get("dazy_unlocked")):
+                save["dazy_unlocked"] = True
+                save["dazy_unlock_count"] = int(save.get("dazy_unlock_count", 0)) + 1
+                # keep sigil_collected empty since progress is per-round
+                save["sigil_collected"] = []
+                write_save(save)
+                clear_screen()
+                print("\nCongratulations Dazy✨！You unlocked the challenge mode 🔥！！\n")
+                input("Press Enter...")
+                save = load_save()
+                clear_screen()
+
             if result.get("won"):
                 print(f"\n🎉 YOU WIN!! The word was: {result.get('word')}  ✧٩(ˊωˋ*)و✧\n")
-                print(f"答案是：{result.get('word')}！\n")
+                print(f"WORD：{result.get('word')}！\n")
             else:
                 print(f"\n💀 YOU LOSE... The word was: {result.get('word')}  (っ˘̩╭╮˘̩)っ\n")
             input("Press Enter to return to menu...")
