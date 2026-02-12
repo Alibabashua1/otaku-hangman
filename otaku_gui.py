@@ -1,3 +1,4 @@
+# --- standard imports
 import sys
 import os
 import time
@@ -8,6 +9,9 @@ import tkinter as tk
 import re
 import traceback
 import codecs
+# Needed for in-process runner
+import runpy
+import builtins
 # fcntl is Unix-only (not available on Windows)
 try:
     import fcntl
@@ -65,6 +69,17 @@ HIGHLIGHT_RULES = [
     ("tag_warn", ["wrong password", "type exactly", "already guessed", "doesn't move"]),
 ]
 
+# Font: Menlo exists on macOS; use Consolas on Windows for proper glyphs.
+FONT_MONO = ("Menlo", 11)
+FONT_MONO_BOLD_10 = ("Menlo", 10, "bold")
+FONT_MONO_BOLD_12 = ("Menlo", 12, "bold")
+FONT_MONO_BOLD_20 = ("Menlo", 20, "bold")
+if sys.platform == "win32":
+    FONT_MONO = ("Consolas", 11)
+    FONT_MONO_BOLD_10 = ("Consolas", 10, "bold")
+    FONT_MONO_BOLD_12 = ("Consolas", 12, "bold")
+    FONT_MONO_BOLD_20 = ("Consolas", 20, "bold")
+
 class OtakuGUI:
     def __init__(self, root):
         self.root = root
@@ -88,6 +103,10 @@ class OtakuGUI:
         # subprocess state
         self.proc = None
         self.out_queue = queue.Queue()
+        # in-proc game runner (for frozen/Windows builds)
+        self.in_queue = queue.Queue()
+        self._game_thread = None
+        self._orig_input = None
         # stdout decoding (incremental, for non-blocking reads)
         self._stdout_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self._reader_thread = None
@@ -279,7 +298,7 @@ class OtakuGUI:
         self.left_status = tk.Label(
             status,
             text="📶 ▂▄▆█  |  --:--",
-            font=("Menlo", 10, "bold"),
+            font=FONT_MONO_BOLD_10,
             bg=BG_TOP,
             fg=HINT_FG,
         )
@@ -288,7 +307,7 @@ class OtakuGUI:
         right_status = tk.Label(
             status,
             text="🔋 ███░  78%  ♡",
-            font=("Menlo", 10, "bold"),
+            font=FONT_MONO_BOLD_10,
             bg=BG_TOP,
             fg=TITLE_FG,
         )
@@ -301,7 +320,7 @@ class OtakuGUI:
         title = tk.Label(
             self.container,
             text="OTAKU HANGMAN",
-            font=("Menlo", 20, "bold"),
+            font=FONT_MONO_BOLD_20,
             bg=BG_TOP,
             fg=TITLE_FG,
         )
@@ -310,7 +329,7 @@ class OtakuGUI:
         badge = tk.Label(
             self.container,
             text="Pocket Console ✦ v1   (ฅ^•ﻌ•^ฅ) ♡",
-            font=("Menlo", 10, "bold"),
+            font=FONT_MONO_BOLD_10,
             bg=BG_TOP,
             fg=HINT_FG,
         )
@@ -339,7 +358,7 @@ class OtakuGUI:
         self.hud_hp = tk.Label(
             self.hud,
             text="HP --/--",
-            font=("Menlo", 10, "bold"),
+            font=FONT_MONO_BOLD_10,
             bg=SCREEN_BG,
             fg=ACCENT_GOLD,
         )
@@ -348,7 +367,7 @@ class OtakuGUI:
         self.hud_mode = tk.Label(
             self.hud,
             text="MODE BOOT",
-            font=("Menlo", 10, "bold"),
+            font=FONT_MONO_BOLD_10,
             bg=SCREEN_BG,
             fg=HINT_FG,
         )
@@ -357,7 +376,7 @@ class OtakuGUI:
         self.hud_sigil = tk.Label(
             self.hud,
             text="SIGIL ◇ ◇ ◇ ◇",
-            font=("Menlo", 10, "bold"),
+            font=FONT_MONO_BOLD_10,
             bg=SCREEN_BG,
             fg=TITLE_FG,
         )
@@ -373,7 +392,7 @@ class OtakuGUI:
             height=18,
             width=56,
             wrap="none",
-            font=("Menlo", 11),
+            font=FONT_MONO,
             bg=SCREEN_BG,
             fg="#ffe6f2",          # soft pink text
             insertbackground="#ffb3d9",  # pink caret
@@ -422,7 +441,7 @@ class OtakuGUI:
             controls,
             text="▶ START",
             command=self.start_game,
-            font=("Menlo", 12, "bold"),
+            font=FONT_MONO_BOLD_12,
             bg="#5a5a5a",
             fg=ACCENT_MINT,
             activebackground="#707070",
@@ -437,7 +456,7 @@ class OtakuGUI:
             controls,
             text="■ STOP",
             command=self.stop_game,
-            font=("Menlo", 12, "bold"),
+            font=FONT_MONO_BOLD_12,
             bg="#5a5a5a",
             fg=ACCENT_ROSEGOLD,
             activebackground="#707070",
@@ -454,7 +473,7 @@ class OtakuGUI:
 
         self.input_entry = tk.Entry(
             input_row,
-            font=("Menlo", 13),
+            font=(FONT_MONO[0], 13),
             bg="#1a1a1a",
             fg="#ffffff",
             insertbackground="#ffb3d9",
@@ -470,7 +489,7 @@ class OtakuGUI:
             input_row,
             text="SEND",
             command=self.send_input,
-            font=("Menlo", 12, "bold"),
+            font=FONT_MONO_BOLD_12,
             bg="#d6d6d6",
             fg="#ffb3d9",
             activebackground="#e6e6e6",
@@ -667,7 +686,7 @@ class OtakuGUI:
                 c.create_oval(hx - 2, yy - 2, hx + 2, yy + 2, fill=hole_fill, outline=hole_outline, tags=("screen",))
 
             # Small label plate
-            c.create_text(18, h - 18, anchor="w", text="BIFROST MICRO ✦ OTAKU", fill="#6a4a78", font=("Menlo", 9, "bold"), tags=("screen",))
+            c.create_text(18, h - 18, anchor="w", text="BIFROST MICRO ✦ OTAKU", fill="#6a4a78", font=(FONT_MONO[0], 9, "bold"), tags=("screen",))
 
             # Keep the drawing behind the embedded Text widget
             c.tag_lower("screen")
@@ -987,57 +1006,144 @@ class OtakuGUI:
         except Exception:
             pass
 
+    # ---------------------
+    # In-process game runner (for frozen/Windows builds)
+    # ---------------------
+    class _QueueStdout:
+        def __init__(self, put_fn):
+            self._put = put_fn
+        def write(self, s):
+            if not s:
+                return 0
+            try:
+                self._put(s)
+            except Exception:
+                pass
+            return len(s)
+        def flush(self):
+            return
+
+    def _input_provider(self, prompt: str = "") -> str:
+        # Send prompt to UI if present
+        try:
+            if prompt:
+                self.out_queue.put(prompt)
+        except Exception:
+            pass
+        # Block until user provides a line
+        try:
+            s = self.in_queue.get()
+        except Exception:
+            s = ""
+        return s
+
+    def _run_game_inproc(self, script_path: str):
+        """Run the hangman script inside this process (Windows/frozen-safe)."""
+        # Patch input/print to route through queues
+        try:
+            self._orig_input = getattr(builtins, "input", None)
+            builtins.input = self._input_provider
+        except Exception:
+            pass
+
+        orig_stdout = sys.stdout
+        orig_stderr = sys.stderr
+        try:
+            sys.stdout = self._QueueStdout(lambda s: self.out_queue.put(s))
+            sys.stderr = sys.stdout
+        except Exception:
+            pass
+
+        try:
+            runpy.run_path(script_path, run_name="__main__")
+        except SystemExit:
+            pass
+        except Exception as e:
+            try:
+                self.out_queue.put("\n[GUI] Game crashed: " + repr(e) + "\n")
+                self.out_queue.put("".join(traceback.format_exception(type(e), e, e.__traceback__)))
+            except Exception:
+                pass
+        finally:
+            try:
+                if self._orig_input is not None:
+                    builtins.input = self._orig_input
+            except Exception:
+                pass
+            try:
+                sys.stdout = orig_stdout
+                sys.stderr = orig_stderr
+            except Exception:
+                pass
+            # ensure UI stops polling if process is gone
+            try:
+                self.proc = None
+            except Exception:
+                pass
+
     def _launch_game_process(self):
         script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "otaku_hang_man.py")
         if not os.path.exists(script_path):
             self._append_output("[GUI] ERROR: otaku_hang_man.py not found next to otaku_gui.py\n")
             return
 
-        try:
-            log("[otaku_gui] launching child:", script_path)
-            env = os.environ.copy()
-            env.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
-            self.proc = subprocess.Popen(
-                [sys.executable, script_path],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=False,
-                cwd=os.path.dirname(script_path),
-                env=env,
-                close_fds=True,
-                start_new_session=True,
-            )
+        # In PyInstaller onefile on Windows, sys.executable is the EXE bootloader (not python).
+        # Run the game in-process to avoid child-process launch failures.
+        is_frozen = bool(getattr(sys, "frozen", False))
+        if sys.platform == "win32" or is_frozen:
             try:
-                log("[otaku_gui] child pid:", self.proc.pid)
-            except Exception:
-                pass
-            # POSIX: Make stdout non-blocking so we can os.read() safely from the Tk main thread.
-            # Windows: fcntl is unavailable; use a reader thread instead.
+                log("[otaku_gui] launching in-proc:", script_path)
+                self._game_thread = threading.Thread(target=self._run_game_inproc, args=(script_path,), daemon=True)
+                self._game_thread.start()
+            except Exception as e:
+                self._append_output(f"[GUI] Failed to start game: {e}\n")
+                return
+        else:
             try:
-                if self.proc and self.proc.stdout and (sys.platform != "win32") and HAS_FCNTL:
-                    fd = self.proc.stdout.fileno()
-                    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-                    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-            except Exception:
-                pass
+                log("[otaku_gui] launching child:", script_path)
+                env = os.environ.copy()
+                env.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+                self.proc = subprocess.Popen(
+                    [sys.executable, script_path],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=False,
+                    cwd=os.path.dirname(script_path),
+                    env=env,
+                    close_fds=True,
+                    start_new_session=True,
+                )
+                try:
+                    log("[otaku_gui] child pid:", self.proc.pid)
+                except Exception:
+                    pass
+                # POSIX: Make stdout non-blocking so we can os.read() safely from the Tk main thread.
+                # Windows: fcntl is unavailable; use a reader thread instead.
+                try:
+                    if self.proc and self.proc.stdout and (sys.platform != "win32") and HAS_FCNTL:
+                        fd = self.proc.stdout.fileno()
+                        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+                        fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+                except Exception:
+                    pass
 
-            # Windows: start a blocking reader thread to avoid freezing the Tk thread
-            try:
-                if sys.platform == "win32":
-                    self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
-                    self._reader_thread.start()
-            except Exception:
-                pass
-            # reset decoder for a fresh run
-            try:
-                self._stdout_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-            except Exception:
-                pass
-        except Exception as e:
-            self._append_output(f"[GUI] Failed to launch: {e}\n")
-            self.proc = None
-            return
+                # Windows: start a blocking reader thread to avoid freezing the Tk thread
+                try:
+                    if sys.platform == "win32":
+                        self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+                        self._reader_thread.start()
+                except Exception:
+                    pass
+                # reset decoder for a fresh run
+                try:
+                    self._stdout_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+                except Exception:
+                    pass
+            except Exception as e:
+                self._append_output(f"[GUI] Failed to launch: {e}\n")
+                self.proc = None
+                return
 
         # enable input
         self.input_entry.configure(state="normal")
@@ -1105,6 +1211,21 @@ class OtakuGUI:
                 pass
 
     def send_input(self, event=None):
+        # In-proc mode (Windows/frozen): route input to queue
+        if (self._game_thread is not None) and (self._game_thread.is_alive()) and (self.proc is None):
+            msg = self.input_entry.get()
+            if msg is None:
+                return
+            if msg.strip() != "":
+                self._append_output(f"> {msg}\n")
+            try:
+                self.in_queue.put(msg)
+            except Exception:
+                pass
+            self.input_entry.delete(0, "end")
+            return
+
+        # Subprocess mode
         if not (self.proc and self.proc.stdin and (self.proc.poll() is None)):
             return
 
@@ -1152,6 +1273,16 @@ class OtakuGUI:
 
         p = self.proc
         self.proc = None
+
+        # Stop in-proc mode: send EOF-ish input and let thread exit
+        try:
+            if self._game_thread is not None and self._game_thread.is_alive():
+                try:
+                    self.in_queue.put("")
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # disable input immediately
         try:
