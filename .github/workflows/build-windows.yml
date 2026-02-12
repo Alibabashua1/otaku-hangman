@@ -1,31 +1,46 @@
 name: Build Windows EXE
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install PyInstaller
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install -U pip
           pip install pyinstaller
 
-      - name: Build EXE (no console)
+      - name: Build EXE (Tkinter GUI)
         run: |
-          pyinstaller --noconsole --onefile --name OtakuHangman otaku_hang_man.py
+          pyinstaller --noconfirm --clean --windowed --onefile ^
+            --name "OtakuHangman" ^
+            --add-data "otaku_hang_man.py;." ^
+            --add-data "otaku_save.json;." ^
+            otaku_gui.py
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Create ZIP
+        run: |
+          powershell Compress-Archive -Path dist\OtakuHangman.exe -DestinationPath OtakuHangman-win.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: OtakuHangman-Windows
-          path: dist/OtakuHangman.exe
+          files: OtakuHangman-win.zip
+          name: "Otaku Hangman ${{ github.ref_name }}"
+          generate_release_notes: true
