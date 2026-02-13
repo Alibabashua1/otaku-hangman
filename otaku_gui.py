@@ -6,9 +6,11 @@ import subprocess
 import threading
 import queue
 import tkinter as tk
+import tkinter.font as tkfont
 import re
 import traceback
 import codecs
+import json
 # Needed for in-process runner
 import runpy
 import builtins
@@ -20,6 +22,12 @@ except ImportError:
     fcntl = None
     HAS_FCNTL = False
 import select
+try:
+    import winsound  # Windows-only
+    HAS_WINSOUND = True
+except Exception:
+    winsound = None
+    HAS_WINSOUND = False
 
 LOG_PATH = "otaku_gui.log"
 
@@ -69,18 +77,77 @@ HIGHLIGHT_RULES = [
     ("tag_warn", ["wrong password", "type exactly", "already guessed", "doesn't move"]),
 ]
 
-# Font: Menlo exists on macOS; use Consolas on Windows for proper glyphs.
-FONT_MONO = ("Menlo", 11)
-FONT_MONO_BOLD_10 = ("Menlo", 10, "bold")
-FONT_MONO_BOLD_12 = ("Menlo", 12, "bold")
-FONT_MONO_BOLD_20 = ("Menlo", 20, "bold")
+# Font selection
+# Windows: prefer fonts with better CJK + box-drawing coverage; fall back safely.
+# macOS: Menlo is fine.
+
+def _pick_font(preferred, fallback="Courier New"):
+    try:
+        fams = set(tkfont.families())
+    except Exception:
+        fams = set()
+    for f in preferred:
+        if f in fams:
+            return f
+    return fallback
+
+# Defaults (macOS/Linux)
+FONT_FAMILY = "Menlo"
 if sys.platform == "win32":
-    FONT_MONO = ("Consolas", 11)
-    FONT_MONO_BOLD_10 = ("Consolas", 10, "bold")
-    FONT_MONO_BOLD_12 = ("Consolas", 12, "bold")
-    FONT_MONO_BOLD_20 = ("Consolas", 20, "bold")
+    # Cascadia Mono is modern Windows; MS Gothic / Yu Gothic UI support JP/CJK; Consolas/Courier as fallback.
+    FONT_FAMILY = _pick_font([
+        "Cascadia Mono",
+        "MS Gothic",
+        "Yu Gothic UI",
+        "Consolas",
+        "Courier New",
+    ])
+
+FONT_MONO = (FONT_FAMILY, 11)
+FONT_MONO_BOLD_10 = (FONT_FAMILY, 10, "bold")
+FONT_MONO_BOLD_12 = (FONT_FAMILY, 12, "bold")
+FONT_MONO_BOLD_20 = (FONT_FAMILY, 20, "bold")
 
 class OtakuGUI:
+    def _beep_hit(self):
+        try:
+            if sys.platform == "win32" and HAS_WINSOUND:
+                # short, low beep
+                try:
+                    winsound.Beep(440, 70)
+                except Exception:
+                    winsound.MessageBeep(winsound.MB_ICONHAND)
+            else:
+                self.root.bell()
+        except Exception:
+            pass
+
+    def _beep_win(self):
+        try:
+            if sys.platform == "win32" and HAS_WINSOUND:
+                # single, softer higher beep
+                try:
+                    winsound.Beep(880, 90)
+                except Exception:
+                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            else:
+                self.root.bell()
+        except Exception:
+            pass
+
+    def _beep_sparkle(self):
+        try:
+            if sys.platform == "win32" and HAS_WINSOUND:
+                # two tiny chirps, different from hit/win
+                try:
+                    winsound.Beep(660, 60)
+                    winsound.Beep(990, 60)
+                except Exception:
+                    winsound.MessageBeep(winsound.MB_OK)
+            else:
+                self.root.bell()
+        except Exception:
+            pass
     def __init__(self, root):
         self.root = root
         self.root.title("OTAKU HANGMAN — Pocket Edition")
@@ -800,10 +867,7 @@ class OtakuGUI:
             self._flash_screen()
             self._shake_window()
             # small sound
-            try:
-                self.root.bell()
-            except Exception:
-                pass
+            self._beep_hit()
         except Exception:
             pass
 
@@ -846,10 +910,7 @@ class OtakuGUI:
             self._last_win_ts = now
             self._win_screen()
             # Win sound: single chime (less loud)
-            try:
-                self.root.bell()
-            except Exception:
-                pass
+            self._beep_win()
         except Exception:
             pass
 
@@ -858,9 +919,9 @@ class OtakuGUI:
         try:
             self._last_sparkle_ts = time.time()
             self._sparkle_screen()
-            # tiny chime: delayed bell so it doesn't feel like the hit sound
+            # tiny chime: delayed so it doesn't feel like the hit sound
             try:
-                self.root.after(40, self.root.bell)
+                self.root.after(40, self._beep_sparkle)
             except Exception:
                 pass
         except Exception:
@@ -977,7 +1038,9 @@ class OtakuGUI:
                     except Exception:
                         pass
                     self._drain_after_id = None
-                if (not self._closing) and self.proc and (self.proc.poll() is None) and self.root.winfo_exists():
+                running_subproc = bool(self.proc and (self.proc.poll() is None))
+                running_inproc = bool((self._game_thread is not None) and (self._game_thread.is_alive()))
+                if (not self._closing) and (running_subproc or running_inproc) and self.root.winfo_exists():
                     self._drain_after_id = self.root.after(60, self._drain_queue)
             except Exception:
                 pass
@@ -1162,9 +1225,17 @@ class OtakuGUI:
         # cancel any previous boot/loading callbacks (kept for safety)
         self._cancel_boot_jobs()
 
-        # already running
-        if self.proc and (self.proc.poll() is None):
-            return
+        # already running (subprocess or in-proc)
+        try:
+            if self.proc and (self.proc.poll() is None):
+                return
+        except Exception:
+            pass
+        try:
+            if (self._game_thread is not None) and (self._game_thread.is_alive()):
+                return
+        except Exception:
+            pass
 
         # if the window is closing, do nothing
         try:
