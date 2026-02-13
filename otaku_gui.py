@@ -77,36 +77,44 @@ HIGHLIGHT_RULES = [
     ("tag_warn", ["wrong password", "type exactly", "already guessed", "doesn't move"]),
 ]
 
-# Font selection
-# Windows: prefer fonts with better CJK + box-drawing coverage; fall back safely.
-# macOS: Menlo is fine.
-
-def _pick_font(preferred, fallback="Courier New"):
-    try:
-        fams = set(tkfont.families())
-    except Exception:
-        fams = set()
-    for f in preferred:
-        if f in fams:
-            return f
-    return fallback
-
-# Defaults (macOS/Linux)
+# Font selection (lazy init: Tk must exist before querying families)
 FONT_FAMILY = "Menlo"
-if sys.platform == "win32":
-    # Cascadia Mono is modern Windows; MS Gothic / Yu Gothic UI support JP/CJK; Consolas/Courier as fallback.
-    FONT_FAMILY = _pick_font([
-        "Cascadia Mono",
-        "MS Gothic",
-        "Yu Gothic UI",
-        "Consolas",
-        "Courier New",
-    ])
-
 FONT_MONO = (FONT_FAMILY, 11)
 FONT_MONO_BOLD_10 = (FONT_FAMILY, 10, "bold")
 FONT_MONO_BOLD_12 = (FONT_FAMILY, 12, "bold")
 FONT_MONO_BOLD_20 = (FONT_FAMILY, 20, "bold")
+
+def _init_fonts():
+    """Initialize FONT_* after Tk root exists (fixes Windows glyph/garble issues)."""
+    global FONT_FAMILY, FONT_MONO, FONT_MONO_BOLD_10, FONT_MONO_BOLD_12, FONT_MONO_BOLD_20
+    try:
+        fams = set(tkfont.families())
+    except Exception:
+        fams = set()
+
+    def pick(preferred, fallback):
+        for f in preferred:
+            if f in fams:
+                return f
+        return fallback
+
+    if sys.platform == "win32":
+        # Prefer MONOSPACE fonts with good box-drawing; avoid proportional fonts.
+        # MS Gothic is fixed-width and supports JP; Cascadia/Consolas/Lucida Console are common.
+        FONT_FAMILY = pick([
+            "Cascadia Mono",
+            "Consolas",
+            "Lucida Console",
+            "MS Gothic",
+            "Courier New",
+        ], "Consolas")
+    else:
+        FONT_FAMILY = "Menlo"
+
+    FONT_MONO = (FONT_FAMILY, 11)
+    FONT_MONO_BOLD_10 = (FONT_FAMILY, 10, "bold")
+    FONT_MONO_BOLD_12 = (FONT_FAMILY, 12, "bold")
+    FONT_MONO_BOLD_20 = (FONT_FAMILY, 20, "bold")
 
 class OtakuGUI:
     def _beep_hit(self):
@@ -174,6 +182,7 @@ class OtakuGUI:
         self.in_queue = queue.Queue()
         self._game_thread = None
         self._orig_input = None
+        self._stop_requested = False
         # stdout decoding (incremental, for non-blocking reads)
         self._stdout_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self._reader_thread = None
@@ -219,6 +228,12 @@ class OtakuGUI:
         self._screen_outline_win = ACCENT_MINT       # mint green (normal correct guess)
         self._screen_outline = self._screen_outline_normal
         self._screen_outline_width = 1
+
+        # Initialize fonts now that Tk exists (important on Windows)
+        try:
+            _init_fonts()
+        except Exception:
+            pass
 
         try:
             self.build_ui()
@@ -1093,12 +1108,24 @@ class OtakuGUI:
                 self.out_queue.put(prompt)
         except Exception:
             pass
-        # Block until user provides a line
+        # Block until user provides a line, but allow stop to interrupt
         try:
-            s = self.in_queue.get()
+            if getattr(self, "_stop_requested", False):
+                raise EOFError
         except Exception:
-            s = ""
-        return s
+            pass
+        while True:
+            try:
+                if getattr(self, "_stop_requested", False):
+                    raise EOFError
+                s = self.in_queue.get(timeout=0.2)
+                return s
+            except queue.Empty:
+                continue
+            except EOFError:
+                raise
+            except Exception:
+                return ""
 
     def _run_game_inproc(self, script_path: str):
         """Run the hangman script inside this process (Windows/frozen-safe)."""
@@ -1119,7 +1146,7 @@ class OtakuGUI:
 
         try:
             runpy.run_path(script_path, run_name="__main__")
-        except SystemExit:
+        except (SystemExit, EOFError):
             pass
         except Exception as e:
             try:
@@ -1270,7 +1297,8 @@ class OtakuGUI:
             self.send_btn.configure(state="disabled")
         except Exception:
             pass
-
+        # Reset stop flag before launching game
+        self._stop_requested = False
         # Launch immediately (no after-based loading)
         try:
             self._launch_game_process()
@@ -1345,9 +1373,19 @@ class OtakuGUI:
         p = self.proc
         self.proc = None
 
-        # Stop in-proc mode: send EOF-ish input and let thread exit
+        # Stop in-proc mode: request stop and unblock input()
+        try:
+            self._stop_requested = True
+        except Exception:
+            pass
         try:
             if self._game_thread is not None and self._game_thread.is_alive():
+                # Try a clean quit option first (menu option 4)
+                try:
+                    self.in_queue.put("4")
+                except Exception:
+                    pass
+                # Also unblock any pending input() calls
                 try:
                     self.in_queue.put("")
                 except Exception:
