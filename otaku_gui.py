@@ -170,10 +170,17 @@ def _init_fonts():
     else:
         FONT_FAMILY = "Menlo"
 
-    FONT_MONO = (FONT_FAMILY, 11)
-    FONT_MONO_BOLD_10 = (FONT_FAMILY, 10, "bold")
-    FONT_MONO_BOLD_12 = (FONT_FAMILY, 12, "bold")
-    FONT_MONO_BOLD_20 = (FONT_FAMILY, 20, "bold")
+    if sys.platform == "win32":
+        # Slightly smaller to fit full menus/frames vertically
+        FONT_MONO = (FONT_FAMILY, 10)
+        FONT_MONO_BOLD_10 = (FONT_FAMILY, 9, "bold")
+        FONT_MONO_BOLD_12 = (FONT_FAMILY, 11, "bold")
+        FONT_MONO_BOLD_20 = (FONT_FAMILY, 18, "bold")
+    else:
+        FONT_MONO = (FONT_FAMILY, 11)
+        FONT_MONO_BOLD_10 = (FONT_FAMILY, 10, "bold")
+        FONT_MONO_BOLD_12 = (FONT_FAMILY, 12, "bold")
+        FONT_MONO_BOLD_20 = (FONT_FAMILY, 20, "bold")
 
 class OtakuGUI:
     def _beep_hit(self):
@@ -219,7 +226,7 @@ class OtakuGUI:
         self.root = root
         self.root.title("OTAKU HANGMAN — Pocket Edition")
         if sys.platform == "win32":
-            self.root.geometry("600x780")
+            self.root.geometry("600x920")
         else:
             self.root.geometry("520x680")
         self.root.configure(bg=BG_TOP)
@@ -227,7 +234,7 @@ class OtakuGUI:
         try:
             self.root.resizable(False, False)
             if sys.platform == "win32":
-                self.root.minsize(600, 780)
+                self.root.minsize(600, 920)
             else:
                 self.root.minsize(520, 680)
         except Exception:
@@ -443,7 +450,7 @@ class OtakuGUI:
 
         # Top status bar (fake UI)
         status = tk.Frame(self.container, bg=BG_TOP)
-        status.pack(pady=(10, 2), padx=18, fill="x")
+        status.pack(pady=((6, 2) if sys.platform == "win32" else (10, 2)), padx=18, fill="x")
 
         self.left_status = tk.Label(
             status,
@@ -474,7 +481,7 @@ class OtakuGUI:
             bg=BG_TOP,
             fg=TITLE_FG,
         )
-        title.pack(pady=(16, 10))
+        title.pack(pady=((12, 6) if sys.platform == "win32" else (16, 10)))
 
         badge = tk.Label(
             self.container,
@@ -483,7 +490,7 @@ class OtakuGUI:
             bg=BG_TOP,
             fg=HINT_FG,
         )
-        badge.pack(pady=(0, 8))
+        badge.pack(pady=((0, 6) if sys.platform == "win32" else (0, 8)))
 
         # Card panel (retro device screen)
         card_shadow = tk.Frame(self.container, bg="#000000")
@@ -497,7 +504,7 @@ class OtakuGUI:
             bg="#09050a",
             highlightthickness=0,
             width=(540 if sys.platform == "win32" else 480),
-            height=(420 if sys.platform == "win32" else 380),
+            height=(560 if sys.platform == "win32" else 380),
         )
         self.screen_canvas.pack()
         self.screen_canvas.bind("<Configure>", self._redraw_screen)
@@ -539,14 +546,14 @@ class OtakuGUI:
 
         self.console = tk.Text(
             self.console_frame,
-            wrap="char",
+            wrap="none",
             font=FONT_MONO,
             bg=SCREEN_BG,
             fg="#ffe6f2",          # soft pink text
             insertbackground="#ffb3d9",  # pink caret
             relief="flat",
-            padx=(8 if sys.platform == "win32" else 10),
-            pady=(8 if sys.platform == "win32" else 10),
+            padx=(5 if sys.platform == "win32" else 10),
+            pady=(5 if sys.platform == "win32" else 10),
             highlightthickness=0,
             borderwidth=0,
         )
@@ -574,7 +581,7 @@ class OtakuGUI:
             anchor="nw",
             window=self.console_frame,
             width=(500 if sys.platform == "win32" else 444),
-            height=(360 if sys.platform == "win32" else 320),
+            height=(520 if sys.platform == "win32" else 320),
             tags=("console",)
         )
 
@@ -629,7 +636,7 @@ class OtakuGUI:
             bd=1,
         )
         self.input_entry.configure(highlightthickness=1, highlightbackground="#5a5a5a", highlightcolor="#ffb3d9")
-        self.input_entry.pack(side="left", fill="x", expand=True, ipady=8)
+        self.input_entry.pack(side="left", fill="x", expand=True, ipady=(6 if sys.platform == "win32" else 8))
         self.input_entry.configure(state="disabled")
         self.input_entry.bind("<Return>", self.send_input)
 
@@ -652,11 +659,11 @@ class OtakuGUI:
         hint = tk.Label(
             self.container,
             text=ui_text("TIP: press ▶ START, then type 1/3/4 + letters ✧ (ง •̀_•́)ง  ♡"),
-            font=("Helvetica", 10),
+            font=("Helvetica", (9 if sys.platform == "win32" else 10)),
             bg=BG_TOP,
             fg=HINT_FG,
         )
-        hint.pack(pady=(6, 8))
+        hint.pack(pady=((4, 6) if sys.platform == "win32" else (6, 8)))
 
     
     def _set_hud(self, hp=None, mode=None, sigil=None):
@@ -1011,6 +1018,144 @@ class OtakuGUI:
     # ---------------------
     # Terminal helpers
     # ---------------------
+    def _wrap_to_console_width(self, s: str) -> str:
+        """Hard-wrap long lines to the current console width on Windows.
+
+        IMPORTANT: Preserve menu/frame borders like `║ ... ║` by wrapping the *inside* and
+        re-applying borders on each wrapped line. This avoids the "missing vertical border"
+        look and restores the original menu layout.
+        """
+        try:
+            if not s:
+                return s
+            if sys.platform != "win32":
+                return s
+            if not hasattr(self, "console") or self.console is None:
+                return s
+
+            # Ensure geometry is up to date
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
+
+            try:
+                wpx = int(self.console.winfo_width())
+            except Exception:
+                wpx = 0
+
+            # Compute max columns from pixel width using current font
+            if wpx <= 0:
+                max_cols = 70
+            else:
+                try:
+                    f = tkfont.Font(font=self.console.cget("font"))
+                    ch = max(6, int(f.measure("M")))
+                    max_cols = max(48, int((wpx - 18) / ch))
+                except Exception:
+                    max_cols = 70
+
+            import unicodedata
+
+            def dwidth(text: str) -> int:
+                # Approximate display width: treat East Asian Wide/Fullwidth as 2 columns
+                w = 0
+                for ch in text:
+                    if ch == "\t":
+                        w += 4
+                        continue
+                    if unicodedata.east_asian_width(ch) in ("W", "F"):
+                        w += 2
+                    else:
+                        w += 1
+                return w
+
+            def take_by_width(text: str, width: int) -> tuple[str, str]:
+                # Return (head, tail) where head has display width <= width
+                if width <= 0:
+                    return "", text
+                w = 0
+                i = 0
+                while i < len(text):
+                    ch = text[i]
+                    cw = 4 if ch == "\t" else (2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1)
+                    if w + cw > width:
+                        break
+                    w += cw
+                    i += 1
+                return text[:i], text[i:]
+
+            def pad_to_width(text: str, width: int) -> str:
+                cur = dwidth(text)
+                if cur >= width:
+                    return text
+                return text + (" " * (width - cur))
+
+            out_lines: list[str] = []
+            for line in s.split("\n"):
+                if not line:
+                    out_lines.append("")
+                    continue
+
+                # If it already fits, keep it
+                if dwidth(line) <= max_cols:
+                    out_lines.append(line)
+                    continue
+
+                # Detect framed lines like: ║ .... ║  or | .... |
+                left = line[:1]
+                right = line[-1:]
+                is_frame = (left in ("║", "|", "┃") and right in ("║", "|", "┃"))
+
+                if is_frame and max_cols >= 4:
+                    inner = line[1:-1]
+                    inner_w = max_cols - 2
+
+                    # Do NOT wrap framed lines into multiple lines (that breaks box layouts).
+                    # Instead, clip the inner content to the visible width and pad.
+                    head, _tail = take_by_width(inner, inner_w)
+                    head = pad_to_width(head, inner_w)
+                    out_lines.append(left + head + right)
+                    continue
+
+                # Non-frame line: wrap by display width (preserve leading indentation)
+                m = re.match(r"^(\s+)", line)
+                prefix = m.group(1) if m else ""
+                prefix_w = dwidth(prefix)
+                avail = max(10, max_cols - prefix_w)
+
+                rest = line
+                first = True
+                while dwidth(rest) > max_cols:
+                    if first:
+                        head, rest2 = take_by_width(rest, max_cols)
+                        out_lines.append(head)
+                        rest = rest2
+                        first = False
+                    else:
+                        # Wrap continuation with prefix
+                        # Strip prefix from rest if it already has it
+                        if prefix and rest.startswith(prefix):
+                            rest = rest[len(prefix):]
+                        head, rest2 = take_by_width(rest, avail)
+                        out_lines.append(prefix + head)
+                        rest = rest2
+
+                    if rest == "":
+                        break
+
+                if rest:
+                    if first:
+                        out_lines.append(rest)
+                    else:
+                        if prefix and not rest.startswith(prefix):
+                            out_lines.append(prefix + rest)
+                        else:
+                            out_lines.append(rest)
+
+            return "\n".join(out_lines)
+        except Exception:
+            return s
     def _clear_console(self):
         """Clear the embedded console safely and reset tagging state."""
         try:
@@ -1024,13 +1169,26 @@ class OtakuGUI:
         self._tag_scan_index = "1.0"
     def _append_output(self, text: str):
         try:
-            # Strip terminal clear-screen sequences but DO NOT clear the Text widget.
-            # We want continuous scrolling output (no "page switch").
+            # If the game requests a full-screen redraw (ANSI clear), emulate it by clearing
+            # the Text widget BEFORE inserting the new frame. Otherwise frames accumulate and
+            # the top of the current screen scrolls out of view.
             if text:
+                has_clear = ("\x1b[2J" in text) or ("\x1b[H" in text) or ("\x1b[3J" in text)
+                if has_clear:
+                    try:
+                        self._clear_console()
+                        # Also reset parse/tag scan so HUD/highlights remain consistent
+                        self._parse_buf = ""
+                        self._tag_scan_index = "1.0"
+                    except Exception:
+                        pass
                 text = text.replace("\x1b[2J", "").replace("\x1b[H", "").replace("\x1b[3J", "")
             # Strip ANSI escape sequences produced by terminal clear-screen commands
             if text:
                 text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+            # Normalize carriage returns (some terminal output uses \r for in-place updates)
+            if text:
+                text = text.replace("\r\n", "\n").replace("\r", "\n")
             # Feedback cues (precedence: DAZY sparkle > WIN green > HIT pink)
             if text:
                 t = text.lower()
@@ -1062,6 +1220,7 @@ class OtakuGUI:
             self.console.configure(state="normal")
             if text:
                 text = console_text(text)
+                text = self._wrap_to_console_width(text)
             self.console.insert("end", text)
             self.console.see("end")
             try:
