@@ -218,12 +218,18 @@ class OtakuGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("OTAKU HANGMAN — Pocket Edition")
-        self.root.geometry("520x680")
+        if sys.platform == "win32":
+            self.root.geometry("600x780")
+        else:
+            self.root.geometry("520x680")
         self.root.configure(bg=BG_TOP)
         # Keep a stable layout (avoid canvas being smaller than our fixed UI)
         try:
             self.root.resizable(False, False)
-            self.root.minsize(520, 680)
+            if sys.platform == "win32":
+                self.root.minsize(600, 780)
+            else:
+                self.root.minsize(520, 680)
         except Exception:
             pass
 
@@ -411,7 +417,8 @@ class OtakuGUI:
                     self.bg_canvas.create_rectangle(0, y1, w, y2, tags=("grad",), outline=color, fill=color)
 
                 self.bg_canvas.tag_lower("grad")
-                self._base_x = max(0, (w - 520) // 2)
+                target_w = 600 if sys.platform == "win32" else 520
+                self._base_x = max(0, (w - target_w) // 2)
                 self._base_y = 0
                 self.bg_canvas.coords(self.container_id, self._base_x, self._base_y)
             except Exception as e:
@@ -489,8 +496,8 @@ class OtakuGUI:
             card_panel,
             bg="#09050a",
             highlightthickness=0,
-            width=480,
-            height=380,
+            width=(540 if sys.platform == "win32" else 480),
+            height=(420 if sys.platform == "win32" else 380),
         )
         self.screen_canvas.pack()
         self.screen_canvas.bind("<Configure>", self._redraw_screen)
@@ -532,16 +539,14 @@ class OtakuGUI:
 
         self.console = tk.Text(
             self.console_frame,
-            height=18,
-            width=56,
             wrap="char",
             font=FONT_MONO,
             bg=SCREEN_BG,
             fg="#ffe6f2",          # soft pink text
             insertbackground="#ffb3d9",  # pink caret
             relief="flat",
-            padx=10,
-            pady=10,
+            padx=(8 if sys.platform == "win32" else 10),
+            pady=(8 if sys.platform == "win32" else 10),
             highlightthickness=0,
             borderwidth=0,
         )
@@ -568,8 +573,8 @@ class OtakuGUI:
             18, 44,
             anchor="nw",
             window=self.console_frame,
-            width=444,
-            height=320,
+            width=(500 if sys.platform == "win32" else 444),
+            height=(360 if sys.platform == "win32" else 320),
             tags=("console",)
         )
 
