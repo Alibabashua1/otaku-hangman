@@ -84,6 +84,65 @@ FONT_MONO_BOLD_10 = (FONT_FAMILY, 10, "bold")
 FONT_MONO_BOLD_12 = (FONT_FAMILY, 12, "bold")
 FONT_MONO_BOLD_20 = (FONT_FAMILY, 20, "bold")
 
+# =====================
+#  Windows glyph-safe text helpers
+# =====================
+USE_ASCII_UI = (sys.platform == "win32")
+
+_UI_REPL = {
+    "📶": "NET",
+    "🔋": "BAT",
+    "♡": "<3",
+    "✦": "*",
+    "✧": "*",
+    "▶": ">",
+    "■": "[]",
+}
+
+_KAOMOJI_REPL = {
+    "(ฅ^•ﻌ•^ฅ)": "(^_^)" ,
+    "(ฅ^•ﻌ•^ฅ) ♡": "(^_^) <3",
+    "(ง •̀_•́)ง": "(>_<)",
+}
+
+_CONSOLE_REPL = {
+    "◆": "*",
+    "◇": ".",
+    "✅": "[OK]",
+    "❌": "[X]",
+    "📺": "From",
+    "💗": "HP",
+    "🔥": "[FIRE]",
+    "✨": "*",
+    "♡": "<3",
+    "✦": "*",
+    "✧": "*",
+}
+
+def ui_text(s: str) -> str:
+    if not s:
+        return s
+    if not USE_ASCII_UI:
+        return s
+    for k, v in _KAOMOJI_REPL.items():
+        s = s.replace(k, v)
+    for k, v in _UI_REPL.items():
+        s = s.replace(k, v)
+    return s
+
+def console_text(s: str) -> str:
+    if not s:
+        return s
+    if not USE_ASCII_UI:
+        return s
+    for k, v in _CONSOLE_REPL.items():
+        s = s.replace(k, v)
+    try:
+        s = s.replace("\u200b", "").replace("\ufeff", "")
+    except Exception:
+        pass
+    return s
+
 def _init_fonts():
     """Initialize FONT_* after Tk root exists (fixes Windows glyph/garble issues)."""
     global FONT_FAMILY, FONT_MONO, FONT_MONO_BOLD_10, FONT_MONO_BOLD_12, FONT_MONO_BOLD_20
@@ -183,6 +242,8 @@ class OtakuGUI:
         self._game_thread = None
         self._orig_input = None
         self._stop_requested = False
+        self._orig_stdin = None
+        self._stdin_proxy = None
         # stdout decoding (incremental, for non-blocking reads)
         self._stdout_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self._reader_thread = None
@@ -294,7 +355,7 @@ class OtakuGUI:
                 return
             if hasattr(self, "left_status") and self.left_status is not None:
                 now = time.strftime("%H:%M")
-                self.left_status.configure(text=f"📶 ▂▄▆█  |  {now}")
+                self.left_status.configure(text=ui_text(f"📶 ▂▄▆█  |  {now}"))
         except Exception as e:
             log_exc("[otaku_gui] clock update error:", e)
         finally:
@@ -379,7 +440,7 @@ class OtakuGUI:
 
         self.left_status = tk.Label(
             status,
-            text="📶 ▂▄▆█  |  --:--",
+            text=ui_text("📶 ▂▄▆█  |  --:--"),
             font=FONT_MONO_BOLD_10,
             bg=BG_TOP,
             fg=HINT_FG,
@@ -388,7 +449,7 @@ class OtakuGUI:
 
         right_status = tk.Label(
             status,
-            text="🔋 ███░  78%  ♡",
+            text=ui_text("🔋 ███░  78%  ♡"),
             font=FONT_MONO_BOLD_10,
             bg=BG_TOP,
             fg=TITLE_FG,
@@ -410,7 +471,7 @@ class OtakuGUI:
 
         badge = tk.Label(
             self.container,
-            text="Pocket Console ✦ v1   (ฅ^•ﻌ•^ฅ) ♡",
+            text=ui_text("Pocket Console ✦ v1   (ฅ^•ﻌ•^ฅ) ♡"),
             font=FONT_MONO_BOLD_10,
             bg=BG_TOP,
             fg=HINT_FG,
@@ -473,7 +534,7 @@ class OtakuGUI:
             self.console_frame,
             height=18,
             width=56,
-            wrap="none",
+            wrap="char",
             font=FONT_MONO,
             bg=SCREEN_BG,
             fg="#ffe6f2",          # soft pink text
@@ -585,7 +646,7 @@ class OtakuGUI:
 
         hint = tk.Label(
             self.container,
-            text="TIP: press ▶ START, then type 1/3/4 + letters ✧ (ง •̀_•́)ง  ♡",
+            text=ui_text("TIP: press ▶ START, then type 1/3/4 + letters ✧ (ง •̀_•́)ง  ♡"),
             font=("Helvetica", 10),
             bg=BG_TOP,
             fg=HINT_FG,
@@ -994,6 +1055,8 @@ class OtakuGUI:
                     self._parse_line_for_hud(line)
 
             self.console.configure(state="normal")
+            if text:
+                text = console_text(text)
             self.console.insert("end", text)
             self.console.see("end")
             try:
@@ -1101,6 +1164,24 @@ class OtakuGUI:
         def flush(self):
             return
 
+    class _StdinProxy:
+        def __init__(self, read_fn):
+            self._read_fn = read_fn
+
+        def readline(self, *args, **kwargs):
+            # Match sys.stdin.readline() contract: return a string ending with \n
+            s = self._read_fn("")
+            if s is None:
+                return ""
+            if not isinstance(s, str):
+                try:
+                    s = str(s)
+                except Exception:
+                    return "\n"
+            if s.endswith("\n"):
+                return s
+            return s + "\n"
+
     def _input_provider(self, prompt: str = "") -> str:
         # Send prompt to UI if present
         try:
@@ -1136,6 +1217,14 @@ class OtakuGUI:
         except Exception:
             pass
 
+        # Some parts of the game use sys.stdin.readline() (e.g., secret password). Provide a compatible stdin.
+        try:
+            self._orig_stdin = getattr(sys, "stdin", None)
+            self._stdin_proxy = self._StdinProxy(self._input_provider)
+            sys.stdin = self._stdin_proxy
+        except Exception:
+            pass
+
         orig_stdout = sys.stdout
         orig_stderr = sys.stderr
         try:
@@ -1158,6 +1247,11 @@ class OtakuGUI:
             try:
                 if self._orig_input is not None:
                     builtins.input = self._orig_input
+            except Exception:
+                pass
+            try:
+                if self._orig_stdin is not None:
+                    sys.stdin = self._orig_stdin
             except Exception:
                 pass
             try:
@@ -1284,12 +1378,12 @@ class OtakuGUI:
 
         # Show an immediate start banner (no scheduled boot steps)
         self._set_hud(hp="--/--", mode="MENU", sigil="◇ ◇ ◇ ◇")
-        self._append_output(
+        self._append_output(ui_text(
             "╭──────────────────────────────╮\n"
             "│  OTAKU HANGMAN — POCKET v1   │\n"
-            "│  starting... (ฅ^•ﻌ•^ฅ) ♡      │\n"
+            "│  starting... (ฅ^•ﻌ•^ฅ) ♡     │\n"
             "╰──────────────────────────────╯\n\n"
-        )
+        ))
 
         # disable input until the process is launched
         try:
