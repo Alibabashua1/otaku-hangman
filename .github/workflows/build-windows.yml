@@ -30,7 +30,7 @@ jobs:
       # IMPORTANT: use cmd so PowerShell doesn't choke on flags / continuation
       - name: Build EXE (Tkinter GUI)
         shell: cmd
-        run: pyinstaller --noconfirm --clean --windowed --onefile --name "OtakuHangman" --hidden-import json --add-data "otaku_hang_man.py;." --add-data "otaku_save.json;." otaku_gui.py
+        run: pyinstaller --noconfirm --clean --windowed --onefile --name "OtakuHangman" --hidden-import json --add-data "otaku_hang_man.py;." otaku_gui.py
 
       - name: Create ZIP
         shell: pwsh
