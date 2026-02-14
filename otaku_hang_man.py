@@ -626,13 +626,29 @@ Maybe open a window.
 Maybe laugh a little.
 
 Bonus stat gained:
-+1 Softness ✧
++1 Softness *
 
 System shutting up now.
-(๑>ᴗ<๑)♡
+(๑>ᴗ<๑)<3
 A_
 """)
     input("Press Enter...")
+
+    import datetime
+    _today = datetime.datetime.now()
+    if _today.month == 2 and _today.day == 14:
+        print("\n[VALENTINE PATCH v1.0]\n")
+        print("System notice:")
+        print("Today is Valentine’s Day.\n")
+        print("Stat update:")
+        print("+1 Warmth")
+        print("+1 Mischief\n")
+        print("Cause:")
+        print("Unknown.")
+        print("Possible horse-year amplification affecting Tiger-class rizz levels.\n")
+        print("System going offline.")
+        print("(pretending nothing happened)\n")
+        input("Press Enter...")
 
 
 def unlock_secret_note_if_eligible(save):
