@@ -75,6 +75,7 @@ HIGHLIGHT_RULES = [
     ("tag_lose", ["you lose", "game over", "wrong", "life -1", "streak reset", "failed"]),
     ("tag_unlock", ["congratulations dazy", "unlocked the challenge mode", "challenge cleared", "password accepted"]),
     ("tag_warn", ["wrong password", "type exactly", "already guessed", "doesn't move"]),
+    ("tag_note", ["secret note", "otaku grandmaster", "achievement unlocked", "bonus stat", "softness", "system shutting"]),
 ]
 
 # Font selection (lazy init: Tk must exist before querying families)
@@ -113,6 +114,9 @@ _CONSOLE_REPL = {
     "📺": "From",
     "💗": "HP",
     "🔥": "[FIRE]",
+    "【fire】": "[FIRE]",
+    "【FIRE】": "[FIRE]",
+    "【Fire】": "[FIRE]",
     "✨": "*",
     "♡": "<3",
     "✦": "*",
@@ -568,6 +572,8 @@ class OtakuGUI:
         self.console.tag_configure("tag_lose", foreground=ACCENT_RED)
         self.console.tag_configure("tag_unlock", foreground=ACCENT_GOLD)
         self.console.tag_configure("tag_warn", foreground=ACCENT_ROSEGOLD)
+        # Secret note / cute ending
+        self.console.tag_configure("tag_note", foreground=TITLE_FG)
 
         self.console.configure(state="disabled")
         # Disable user scrolling/dragging: behave like a terminal that always stays at the bottom

@@ -637,17 +637,28 @@ A_
     import datetime
     _today = datetime.datetime.now()
     if _today.month == 2 and _today.day == 14:
-        print("\n[VALENTINE PATCH v1.0]\n")
+        print("\n\n")
+        print("\n" + "=" * 46)
+        print("[VALENTINE PATCH v1.0]")
+        print("=" * 46 + "\n")
+
         print("System notice:")
         print("Today is Valentine’s Day.\n")
+
         print("Stat update:")
         print("+1 Warmth")
         print("+1 Mischief\n")
+
         print("Cause:")
         print("Unknown.")
-        print("Possible horse-year amplification affecting Tiger-class rizz levels.\n")
+        print("Possible horse-year amplification affecting")
+        print("Tiger-class rizz levels.\n")
+
+        print("-" * 46)
         print("System going offline.")
-        print("(pretending nothing happened)\n")
+        print("(pretending nothing happened)")
+        print("-" * 46 + "\n")
+
         input("Press Enter...")
 
 
